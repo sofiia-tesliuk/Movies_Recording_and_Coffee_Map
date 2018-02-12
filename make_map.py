@@ -113,16 +113,13 @@ def dict_films(lines):
         return [get_coordinates(loc), loc, name]
 
     locations = dict()
-    #print(get_location('"2091" (2016) {Caballo de '\
-    #    + 'Troya (#1.4)}			Tatacoa Desert, Colombia	(location)'))
     for line in lines:
         while True:
             try:
                 movie_loc = get_location(line)
                 break
             except GeocoderTimedOut:
-                print("Something gone wrong...")
-                print(line)
+                continue
         coordinates = movie_loc[0]
         # This location has founded
         if coordinates[0]:
@@ -154,7 +151,7 @@ def location_csv_file(dict_loc, year):
             # Name of loc, number of films in this loc,
             # latitude, longitude, names of films
             lst = [loc_info[0], loc_info[1],
-                   coordinates[0], coordinates[1], loc_info[2]]
+                   coordinates[0], coordinates[1], '<br>'.join(loc_info[2:])]
             writer.writerow(lst)
         # Close and save csv file
         csvfile.close()
@@ -194,8 +191,10 @@ def make_html_map(path, year):
             return {'fillColor': 'red'}
 
     map = folium.Map(zoom_start=3)
-    folium.TileLayer('stamentoner').add_to(map)
-    data = pandas.read_csv(path)
+    try:
+        data = pandas.read_csv(path)
+    except FileNotFoundError:
+        return -1
     lat = data['latitude']
     lon = data['longitude']
     num = data['Number of films in this location']
@@ -211,9 +210,20 @@ def make_html_map(path, year):
                                                 fill_opacity=1))
 
     fg_pp = folium.FeatureGroup(name="Population")
-    fg_pp.add_child(folium.GeoJson(data=open('world1.json', 'r',
+    fg_pp.add_child(folium.GeoJson(data=open('world.json', 'r',
                                              encoding='utf-8-sig').read(),
                                    style_function=color_population))
+
+    data = pandas.read_csv('coffee.csv')
+    lat = data['_lat_']
+    lon = data['_lon_']
+    name = data['_name_']
+    fg_cf = folium.FeatureGroup(name="Where you can find coffee")
+    for lt, ln in zip(lat, lon):
+        loc_layer.add_child(folium.Marker(location=[lt, ln],
+                                          icon=folium.Icon()))
+
+    map.add_child(fg_cf)
     map.add_child(fg_pp)
     map.add_child(loc_layer)
     map.add_child(folium.LayerControl())
@@ -241,10 +251,7 @@ if __name__ == "__main__":
 
     while True:
         # Maybe, for creating map, in folder are additional files
-        try:
-            make_html_map('films_{}.csv'.format(year_test), year_test)
-            break
-        except FileNotFoundError:
+        if make_html_map('films_{}.csv'.format(year_test), year_test) == -1:
             data = read_data('locations.list.txt')
             # File with data have founded
             if data:
@@ -254,6 +261,8 @@ if __name__ == "__main__":
                 location_csv_file(dict_movi, year_test)
             else:
                 break
+        else:
+            break
 
     fn = time.time()
     print("This process continued {} seconds.".format(fn - st))
