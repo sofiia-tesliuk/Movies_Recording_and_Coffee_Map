@@ -1,9 +1,9 @@
 import pandas
 import folium
-import geocoder
 import csv
 import random
-from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut
+from geopy.geocoders import ArcGIS
 
 
 def read_data(path):
@@ -60,7 +60,7 @@ def list_lines_year(lines, year):
         if same_year(line, year):
             lines_year.append(line)
 
-    high_limit = 500
+    high_limit = 150
     if len(lines_year) > high_limit:
         lines_year = random.sample(lines_year, high_limit)
     return lines_year
@@ -77,57 +77,64 @@ def dict_films(lines):
         (str) -> (float, float)
         Returns coordinates (latitude, longitude) of location.
         """
-        loc = geocoder.google(loc_name)
-        if not loc.lat:
-            loc = geolocator.geocode(loc_name)
-            if loc:
-                # print("google:\t", repr(loc_name))
-                return (loc.latitude, loc.longitude)
-            else:
-                # print("geopy: \t", repr(loc_name))
-                if loc_name.find(',') != -1:
-                    return get_coordinates(loc_name[loc_name.find(',') + 2:])
-                else:
-                    return (None, None)
+        geolocator = ArcGIS()
+        loc = geolocator.geocode(loc_name)
+        if loc.latitude:
+            return (loc.latitude, loc.longitude)
         else:
-            return (loc.lat, loc.lng)
+            if loc_name.find(',') != -1:
+                return get_coordinates(loc_name[loc_name.find(',') + 2:])
+            else:
+                return (None, None)
 
     def get_location(loc):
         """
-        (str) -> [(float, float), str]
+        (str) -> [(float, float), str, str]
         Returns list of coordinates
         and name of location.
 
         >>> get_location('"13mil" (2015) {Deborah (#1.5)}' \
         + '				Barcelona, Catalonia, Spain')
-        ('13mil', 'Barcelona, Catalonia, Spain'), 'Spain'
+        [(41.38561000000004, 2.1687200000000644), 'Barcelona, Catalonia, Spain', '"13mil"']
         >>> get_location('"2091" (2016) {Caballo de '\
         + 'Troya (#1.4)}			Tatacoa Desert, Colombia	(location)')
-        'Tatacoa Desert, Colombia'
+        [(3.2587800000000584, -75.14029999999997), 'Tatacoa Desert, Colombia', '"2091"']
         """
         if loc.endswith('\n'):
             loc = loc[:-1]
+        # Name of film
+        name = (loc[:loc.find('(')]).strip()
         loc = loc.split('\t')
         # Removes some additional information, like '(studio)'
         if loc[-1][0] == '(':
             loc = loc[-2]
         else:
             loc = loc[-1]
-        return [get_coordinates(loc), loc]
+        return [get_coordinates(loc), loc, name]
 
-    geolocator = Nominatim()
     locations = dict()
+    #print(get_location('"2091" (2016) {Caballo de '\
+    #    + 'Troya (#1.4)}			Tatacoa Desert, Colombia	(location)'))
     for line in lines:
-        movie_loc = get_location(line)
+        while True:
+            try:
+                movie_loc = get_location(line)
+                break
+            except GeocoderTimedOut:
+                print("Something gone wrong...")
+                print(line)
         coordinates = movie_loc[0]
         # This location has founded
         if coordinates[0]:
             # Increase number of created films to this location
             if coordinates in locations:
+                # Increase number of films in this location
                 locations[coordinates][1] += 1
+                # Add name of film in this location
+                locations[coordinates].append(movie_loc[2])
             else:
                 # value: name of location, 1
-                locations[coordinates] = [movie_loc[1], 1]
+                locations[coordinates] = [movie_loc[1], 1, movie_loc[2]]
     return locations
 
 
@@ -141,11 +148,13 @@ def location_csv_file(dict_loc, year):
         writer = csv.writer(csvfile, delimiter=',')
         # Write first line with term of each column
         writer.writerow(['Name of location', 'Number of films in this location',
-                         'latitude', 'longitude'])
+                         'latitude', 'longitude', 'Names of films'])
         # Write each location in csv file
         for coordinates, loc_info in dict_loc.items():
-            # Name of loc, number of films in this loc, latitude, longitude
-            lst = [loc_info[0], loc_info[1], coordinates[0], coordinates[1]]
+            # Name of loc, number of films in this loc,
+            # latitude, longitude, names of films
+            lst = [loc_info[0], loc_info[1],
+                   coordinates[0], coordinates[1], loc_info[2]]
             writer.writerow(lst)
         # Close and save csv file
         csvfile.close()
@@ -157,25 +166,54 @@ def make_html_map(path, year):
     Creates html file with map of films.
     Gets data about locations from path.
     """
-    map = folium.Map(zoom_start = 2.5)
-    data = pandas.read_csv(path)
-    lat = data['lat']
-    lon = data['lon']
-    num = data['Number of films in this location']
+    def color_creator(films_num):
+        """
+        (int) -> (str)
+        Returns name of color for circle marker,
+        depends on number of films in this location.
+        """
+        if films_num == 1:
+            return "green"
+        elif 2 <= films_num <= 4:
+            return "blue"
+        else:
+            return "purple"
 
-    loc_layer = folium.FeatureGroup(name=" locations_of_films ")
-    for nm, lt, ln in zip(num, lat, lon):
-        loc_layer.add_child(folium.Marker(location=[lt, ln],
-                                          popup=nm,
-                                          icon=folium.Icon()))
+    def color_population(popul):
+        """
+        (int) -> (str)
+        Returns name of color for filling area,
+        depends on number of population.
+        """
+        popul = popul['properties']['POP2005']
+        if popul < 10000000:
+            return {'fillColor': 'green'}
+        elif 10000000 <= popul < 20000000:
+            return {'fillColor': 'orange'}
+        else:
+            return {'fillColor': 'red'}
+
+    map = folium.Map(zoom_start=3)
+    folium.TileLayer('stamentoner').add_to(map)
+    data = pandas.read_csv(path)
+    lat = data['latitude']
+    lon = data['longitude']
+    num = data['Number of films in this location']
+    names = data['Names of films']
+    loc_layer = folium.FeatureGroup(name="Locations of films")
+    for nm, lt, ln, mov in zip(num, lat, lon, names):
+        loc_layer.add_child(folium.CircleMarker(location=[lt, ln],
+                                                radius=3,
+                                                # Number of films
+                                                popup=str(nm),
+                                                fill_color='white',
+                                                color=color_creator(nm),
+                                                fill_opacity=1))
 
     fg_pp = folium.FeatureGroup(name="Population")
-    fg_pp.add_child(folium.GeoJson(data=open('world.json', 'r',
+    fg_pp.add_child(folium.GeoJson(data=open('world1.json', 'r',
                                              encoding='utf-8-sig').read(),
-                                   style_function=lambda x: {'fillColor': 'green'
-                                   if x['properties']['POP2005'] < 10000000
-                                   else 'orange' if 10000000 <= x['properties']['POP2005'] < 20000000
-                                   else 'red'}))
+                                   style_function=color_population))
     map.add_child(fg_pp)
     map.add_child(loc_layer)
     map.add_child(folium.LayerControl())
@@ -196,17 +234,26 @@ def input_year():
         input_year()
 
 
-# -------------------------
-# Other useful functions
-# -------------------------
-
 if __name__ == "__main__":
-    year_test = 1895
-    data = list_lines_year(read_data('locations.list.txt'), year_test)
-    print("Get gata about films")
-    dict_movi = dict_films(data)
-    print("Proccesed data")
-    location_csv_file(dict_movi, year_test)
-    print("Created csv file")
-    #make_html_map('films_{}.csv'.format(year_test), year_test)
-    #print("Created html file")
+    import time
+    year_test = input_year()
+    st = time.time()
+
+    while True:
+        # Maybe, for creating map, in folder are additional files
+        try:
+            make_html_map('films_{}.csv'.format(year_test), year_test)
+            break
+        except FileNotFoundError:
+            data = read_data('locations.list.txt')
+            # File with data have founded
+            if data:
+                # Process data, create additional file for creating map
+                data = list_lines_year(data, year_test)
+                dict_movi = dict_films(data)
+                location_csv_file(dict_movi, year_test)
+            else:
+                break
+
+    fn = time.time()
+    print("This process continued {} seconds.".format(fn - st))
