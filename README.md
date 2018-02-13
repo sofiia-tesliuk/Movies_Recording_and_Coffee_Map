@@ -4,6 +4,7 @@ In this repository, you can see sample of web-map, which includes 3 layers.<br/>
 Layers:
 <br    />Some locations (till 150), where films, created in entered year (on sample it's 2017), are set
 ![alt text](https://github.com/sophia-tslk/Web-Map/blob/master/Locations%20of%20films.png)
+![alt text](https://github.com/sophia-tslk/Web-Map/blob/master/Names%20of%20films.png)
 <br    />Population
 ![alt text](https://github.com/sophia-tslk/Web-Map/blob/master/Population.png)
 <br    />Locations in Las Vegas, where you can find coffee
