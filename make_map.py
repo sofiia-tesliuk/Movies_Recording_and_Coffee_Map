@@ -141,6 +141,15 @@ def location_csv_file(dict_loc, year):
     Creates csv file with coordinates of locations and additional information
     into csv file.
     """
+    def line_to_list(lst_films):
+        """
+        (list) -> (str)
+        Returns line that in html will be list.
+        """
+        lst_films = [film.replace('"', '').replace('#', '')
+                     for film in lst_films]
+        return "<ul><li>" + "<li>".join(lst_films) + "</ul>"
+
     with open('films_{}.csv'.format(str(year)), 'w', newline='') as csvfile:
         writer = csv.writer(csvfile, delimiter=',')
         # Write first line with term of each column
@@ -151,7 +160,7 @@ def location_csv_file(dict_loc, year):
             # Name of loc, number of films in this loc,
             # latitude, longitude, names of films
             lst = [loc_info[0], loc_info[1],
-                   coordinates[0], coordinates[1], '<br>'.join(loc_info[2:])]
+                   coordinates[0], coordinates[1], line_to_list(loc_info[2:])]
             writer.writerow(lst)
         # Close and save csv file
         csvfile.close()
@@ -204,7 +213,7 @@ def make_html_map(path, year):
         loc_layer.add_child(folium.CircleMarker(location=[lt, ln],
                                                 radius=3,
                                                 # Number of films
-                                                popup=str(nm),
+                                                popup=mov.replace("'", '"'),
                                                 fill_color='white',
                                                 color=color_creator(nm),
                                                 fill_opacity=1))
@@ -219,9 +228,10 @@ def make_html_map(path, year):
     lon = data['_lon_']
     name = data['_name_']
     fg_cf = folium.FeatureGroup(name="Where you can find coffee")
-    for lt, ln in zip(lat, lon):
-        loc_layer.add_child(folium.Marker(location=[lt, ln],
-                                          icon=folium.Icon()))
+    for nm, lt, ln in zip(name, lat, lon):
+        fg_cf.add_child(folium.Marker(location=[lt, ln],
+                                      icon=folium.Icon(),
+                                      popup=nm.replace("'", '"')))
 
     map.add_child(fg_cf)
     map.add_child(fg_pp)
